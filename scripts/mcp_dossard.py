@@ -166,6 +166,7 @@ def main() -> None:
         try:
             message = json.loads(line)
         except json.JSONDecodeError:
+            print("mcp_dossard : ligne ignorée, JSON invalide", file=sys.stderr)
             continue
         response = handle(message)
         if response is not None:
