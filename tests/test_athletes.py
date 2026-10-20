@@ -54,6 +54,71 @@ def test_list_athletes_filters_by_club(client, make_athlete):
     assert [a["last_name"] for a in response.json()] == ["Durand"]
 
 
+def test_list_athletes_paginates_with_defaults(client, make_athlete):
+    for i in range(60):
+        make_athlete(f"Athlète{i:02d}")
+
+    response = client.get("/athletes")
+
+    assert response.status_code == 200
+    assert len(response.json()) == 50
+
+
+def test_list_athletes_paginates_with_custom_limit(client, make_athlete):
+    for i in range(60):
+        make_athlete(f"Athlète{i:02d}")
+
+    response = client.get("/athletes", params={"limit": 20})
+
+    assert response.status_code == 200
+    assert len(response.json()) == 20
+
+
+def test_list_athletes_paginates_with_offset(client, make_athlete):
+    for i in range(10):
+        make_athlete(f"Athlète{i:02d}")
+    first_names = [a["last_name"] for a in client.get("/athletes", params={"limit": 5}).json()]
+    second_names = [
+        a["last_name"] for a in client.get("/athletes", params={"limit": 5, "offset": 5}).json()
+    ]
+
+    assert first_names != second_names
+    assert len(first_names) == 5
+    assert len(second_names) == 5
+
+
+def test_list_athletes_rejects_limit_below_1(client):
+    response = client.get("/athletes", params={"limit": 0})
+
+    assert response.status_code == 422
+
+
+def test_list_athletes_rejects_limit_above_100(client):
+    response = client.get("/athletes", params={"limit": 101})
+
+    assert response.status_code == 422
+
+
+def test_list_athletes_rejects_negative_offset(client):
+    response = client.get("/athletes", params={"offset": -1})
+
+    assert response.status_code == 422
+
+
+def test_list_athletes_paginates_with_club_filter(client, make_athlete):
+    make_athlete("Durand", club="AC Rivebelle")
+    for i in range(5):
+        make_athlete(f"Athlète{i:02d}", club="AC Rivebelle")
+    make_athlete("Petit", club="Stade Nordval")
+
+    response = client.get("/athletes", params={"club": "AC Rivebelle", "limit": 3})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) == 3
+    assert all(a["club"] == "AC Rivebelle" for a in body)
+
+
 def test_get_athlete_returns_200(client, make_athlete):
     athlete = make_athlete("Durand")
 

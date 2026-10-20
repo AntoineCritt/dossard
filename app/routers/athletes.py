@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Request, status
+from fastapi import APIRouter, Query, Request, status
 
 from app.db import Conn
 from app.repositories import athletes
@@ -10,8 +10,13 @@ router = APIRouter(prefix="/athletes", tags=["athletes"])
 
 
 @router.get("", response_model=list[AthleteOut])
-def list_athletes(conn: Conn, club: str | None = None) -> list[AthleteOut]:
-    return athletes.list_athletes(conn, club=club)
+def list_athletes(
+    conn: Conn,
+    club: str | None = None,
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+) -> list[AthleteOut]:
+    return athletes.list_athletes(conn, club=club, limit=limit, offset=offset)
 
 
 @router.post("", response_model=AthleteOut, status_code=status.HTTP_201_CREATED)
