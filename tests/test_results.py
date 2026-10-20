@@ -1,4 +1,9 @@
+import csv
+import io
+
 import pytest
+
+from app.repositories.results import CSV_HEADER
 
 
 @pytest.fixture
@@ -48,3 +53,24 @@ def test_ranking_unknown_event_returns_404(client):
 
     assert response.status_code == 404
     assert response.json()["error"]["code"] == "not_found"
+
+
+def test_export_csv_quotes_club_names_containing_comma(
+    client, make_competition, make_event, make_athlete, make_registration
+):
+    competition = make_competition(status="open")
+    event = make_event(competition["id"], unit="time_s")
+    athlete = make_athlete("Durand", club="Athlé Club, Lyon")
+    registration = make_registration(event["id"], athlete["id"])
+    client.patch(f"/competitions/{competition['id']}", json={"status": "closed"})
+    response = client.put(f"/registrations/{registration['id']}/result", json={"performance": 12.3})
+    assert response.status_code == 200
+
+    response = client.get(f"/competitions/{competition['id']}/results.csv")
+
+    assert response.status_code == 200
+    rows = list(csv.reader(io.StringIO(response.text)))
+    header, data_row = rows[0], rows[1]
+    assert header == CSV_HEADER
+    assert data_row[header.index("club")] == "Athlé Club, Lyon"
+    assert data_row[header.index("performance")] == "12.3"

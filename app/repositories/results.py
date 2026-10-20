@@ -1,11 +1,28 @@
 from __future__ import annotations
 
+import csv
+import io
 import sqlite3
 from datetime import UTC, datetime
 
 from app.errors import ConflictError, NotFoundError
 from app.repositories.common import fetch_or_404
 from app.schemas import ResultOut
+
+CSV_HEADER = [
+    "competition",
+    "event",
+    "unit",
+    "bib",
+    "first_name",
+    "last_name",
+    "birth_date",
+    "sex",
+    "club",
+    "license_number",
+    "medical_certificate_valid_until",
+    "performance",
+]
 
 
 def record_result(conn: sqlite3.Connection, registration_id: int, performance: float) -> ResultOut:
@@ -66,11 +83,9 @@ def export_csv(conn: sqlite3.Connection, competition_id: int) -> str:
     if competition is None:
         raise NotFoundError(f"Compétition {competition_id} introuvable")
 
-    lines = []
-    lines.append(
-        "competition,event,unit,bib,first_name,last_name,birth_date,sex,club,"
-        "license_number,medical_certificate_valid_until,performance"
-    )
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(CSV_HEADER)
     events = conn.execute(
         "SELECT * FROM events WHERE competition_id = ? ORDER BY id", (competition_id,)
     ).fetchall()
@@ -82,37 +97,26 @@ def export_csv(conn: sqlite3.Connection, competition_id: int) -> str:
             " WHERE r.event_id = ? AND r.status = 'confirmed' ORDER BY r.bib",
             (event["id"],),
         ).fetchall()
-        if event["unit"] == "time_s":
-            for row in rows:
-                line = competition["name"] + "," + event["name"] + "," + event["unit"]
-                line = line + "," + str(row["bib"])
-                line = line + "," + row["first_name"] + "," + row["last_name"]
-                line = line + "," + row["birth_date"] + "," + row["sex"]
-                line = line + "," + (row["club"] or "")
-                line = line + "," + row["license_number"]
-                line = line + "," + (row["medical_certificate_valid_until"] or "")
-                line = line + "," + str(round(row["performance"], 2))
-                lines.append(line)
-        elif event["unit"] == "distance_m":
-            for row in rows:
-                line = competition["name"] + "," + event["name"] + "," + event["unit"]
-                line = line + "," + str(row["bib"])
-                line = line + "," + row["first_name"] + "," + row["last_name"]
-                line = line + "," + row["birth_date"] + "," + row["sex"]
-                line = line + "," + (row["club"] or "")
-                line = line + "," + row["license_number"]
-                line = line + "," + (row["medical_certificate_valid_until"] or "")
-                line = line + "," + str(round(row["performance"], 2))
-                lines.append(line)
-        else:
-            for row in rows:
-                line = competition["name"] + "," + event["name"] + "," + event["unit"]
-                line = line + "," + str(row["bib"])
-                line = line + "," + row["first_name"] + "," + row["last_name"]
-                line = line + "," + row["birth_date"] + "," + row["sex"]
-                line = line + "," + (row["club"] or "")
-                line = line + "," + row["license_number"]
-                line = line + "," + (row["medical_certificate_valid_until"] or "")
-                line = line + "," + str(int(row["performance"]))
-                lines.append(line)
-    return "\n".join(lines) + "\n"
+        for row in rows:
+            performance = (
+                int(row["performance"])
+                if event["unit"] == "points"
+                else round(row["performance"], 2)
+            )
+            writer.writerow(
+                [
+                    competition["name"],
+                    event["name"],
+                    event["unit"],
+                    row["bib"],
+                    row["first_name"],
+                    row["last_name"],
+                    row["birth_date"],
+                    row["sex"],
+                    row["club"] or "",
+                    row["license_number"],
+                    row["medical_certificate_valid_until"] or "",
+                    performance,
+                ]
+            )
+    return buffer.getvalue()
