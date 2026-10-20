@@ -19,7 +19,32 @@
       "PowerShell(Get-Content ./.env)",
       "PowerShell(cat .env)",
       "PowerShell(type .env)",
-      "PowerShell(more .env)"
+      "PowerShell(more .env)",
+      "Edit(scripts/legacy/**)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".venv/Scripts/python.exe .claude/hooks/garde.py"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".venv/Scripts/python.exe .claude/hooks/formate.py"
+          }
+        ]
+      }
     ]
   }
 }
