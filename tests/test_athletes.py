@@ -50,6 +50,60 @@ def test_list_athletes_filters_by_club(client, make_athlete):
     assert [a["last_name"] for a in response.json()] == ["Durand"]
 
 
+def test_list_athletes_paginates_with_defaults(client, make_athlete):
+    for i in range(51):
+        make_athlete(f"Nom{i:02d}")
+
+    response = client.get("/athletes")
+
+    assert response.status_code == 200
+    assert len(response.json()) == 50
+
+
+def test_list_athletes_limit_and_offset(client, make_athlete):
+    for name in ("Arnaud", "Blanc", "Carré", "Dupont"):
+        make_athlete(name)
+
+    response = client.get("/athletes", params={"limit": 2, "offset": 1})
+
+    assert response.status_code == 200
+    assert [a["last_name"] for a in response.json()] == ["Blanc", "Carré"]
+
+
+def test_list_athletes_offset_beyond_total_returns_empty_list(client, make_athlete):
+    make_athlete("Arnaud")
+
+    response = client.get("/athletes", params={"offset": 10})
+
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_list_athletes_accepts_bounds(client, make_athlete):
+    make_athlete("Arnaud")
+
+    assert client.get("/athletes", params={"limit": 1, "offset": 0}).status_code == 200
+    assert client.get("/athletes", params={"limit": 100}).status_code == 200
+
+
+def test_list_athletes_paginates_after_club_filter(client, make_athlete):
+    make_athlete("Arnaud", club="AC Rivebelle")
+    make_athlete("Blanc", club="Stade Nordval")
+    make_athlete("Carré", club="AC Rivebelle")
+    make_athlete("Dupont", club="AC Rivebelle")
+
+    response = client.get("/athletes", params={"club": "AC Rivebelle", "limit": 1, "offset": 1})
+
+    assert response.status_code == 200
+    assert [a["last_name"] for a in response.json()] == ["Carré"]
+
+
+def test_list_athletes_out_of_range_params_return_422(client):
+    for params in ({"limit": 0}, {"limit": 101}, {"offset": -1}, {"limit": "abc"}):
+        response = client.get("/athletes", params=params)
+        assert response.status_code == 422, params
+
+
 def test_get_athlete_returns_200(client, make_athlete):
     athlete = make_athlete("Durand", club="AC Rivebelle")
 
