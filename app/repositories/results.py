@@ -4,6 +4,7 @@ import sqlite3
 from datetime import UTC, datetime
 
 from app.errors import ConflictError, NotFoundError
+from app.repositories.common import fetch_or_404
 from app.schemas import ResultOut
 
 
@@ -36,8 +37,10 @@ def record_result(conn: sqlite3.Connection, registration_id: int, performance: f
     )
 
 
-def find_event(conn: sqlite3.Connection, event_id: int) -> sqlite3.Row | None:
-    return conn.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
+def get_event(conn: sqlite3.Connection, event_id: int) -> sqlite3.Row:
+    return fetch_or_404(
+        conn, "SELECT * FROM events WHERE id = ?", (event_id,), f"Épreuve {event_id} introuvable"
+    )
 
 
 def ranking_rows(conn: sqlite3.Connection, event_id: int) -> list[sqlite3.Row]:
