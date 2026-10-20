@@ -27,11 +27,5 @@
       "Bash(env)",
       "Bash(printenv*)"
     ]
-  },
-  "sandbox": {
-    "enabled": true,
-    "filesystem": {
-      "denyRead": ["./.env", "./.env.*"]
-    }
   }
 }
