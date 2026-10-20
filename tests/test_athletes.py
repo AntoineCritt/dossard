@@ -1,4 +1,9 @@
 from datetime import date
+from pathlib import Path
+
+FIXTURE_CSV = (
+    Path(__file__).resolve().parent.parent / "scripts" / "legacy" / "licencies_exemple.csv"
+)
 
 
 def test_create_athlete_returns_201_with_category(client):
@@ -63,3 +68,30 @@ def test_get_athlete_returns_404_when_missing(client):
 
     assert response.status_code == 404
     assert response.json()["error"]["code"] == "not_found"
+
+
+def test_import_athletes_creates_skips_and_reports_errors(client):
+    content = FIXTURE_CSV.read_text(encoding="utf-8")
+    headers = {"Content-Type": "text/csv"}
+
+    response = client.post("/athletes/import", content=content, headers=headers)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["created"] == 17
+    assert body["skipped"] == 1
+    assert [e["line"] for e in body["errors"]] == [15, 16]
+
+
+def test_import_athletes_twice_skips_everything_already_imported(client):
+    content = FIXTURE_CSV.read_text(encoding="utf-8")
+    headers = {"Content-Type": "text/csv"}
+    client.post("/athletes/import", content=content, headers=headers)
+
+    response = client.post("/athletes/import", content=content, headers=headers)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["created"] == 0
+    assert body["skipped"] == 18
+    assert [e["line"] for e in body["errors"]] == [15, 16]

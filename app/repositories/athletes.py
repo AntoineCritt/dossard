@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import csv
+import io
 import sqlite3
 from datetime import date
+
+from pydantic import ValidationError
 
 from app.categories import age_category
 from app.errors import ConflictError
 from app.repositories.common import fetch_or_404
-from app.schemas import AthleteCreate, AthleteOut
+from app.schemas import AthleteCreate, AthleteImportError, AthleteImportReport, AthleteOut
 
 
 def _to_athlete(row: sqlite3.Row) -> AthleteOut:
@@ -68,3 +72,57 @@ def create_athlete(conn: sqlite3.Connection, data: AthleteCreate) -> AthleteOut:
     )
     row = conn.execute("SELECT * FROM athletes WHERE id = ?", (cursor.lastrowid,)).fetchone()
     return _to_athlete(row)
+
+
+def import_athletes_csv(conn: sqlite3.Connection, content: str) -> AthleteImportReport:
+    reader = csv.DictReader(io.StringIO(content), delimiter=";")
+    created = 0
+    skipped = 0
+    errors: list[AthleteImportError] = []
+    for line_number, row in enumerate(reader, start=2):
+        try:
+            data = _row_to_athlete_create(row)
+        except (ValueError, ValidationError) as exc:
+            errors.append(AthleteImportError(line=line_number, message=_format_row_error(exc)))
+            continue
+        try:
+            create_athlete(conn, data)
+            created += 1
+        except ConflictError:
+            skipped += 1
+    return AthleteImportReport(created=created, skipped=skipped, errors=errors)
+
+
+def _parse_french_date(value: str | None, label: str) -> date | None:
+    value = (value or "").strip()
+    if not value:
+        return None
+    try:
+        day_str, month_str, year_str = value.split("/")
+        return date(int(year_str), int(month_str), int(day_str))
+    except (ValueError, IndexError) as exc:
+        raise ValueError(f"{label} invalide : « {value} »") from exc
+
+
+def _row_to_athlete_create(row: dict[str, str | None]) -> AthleteCreate:
+    birth_date = _parse_french_date(row.get("date_naissance"), "Date de naissance")
+    if birth_date is None:
+        raise ValueError("Date de naissance manquante")
+    certificate = _parse_french_date(row.get("certificat_valide_jusqu"), "Certificat médical")
+    return AthleteCreate(
+        first_name=(row.get("prenom") or "").strip(),
+        last_name=(row.get("nom") or "").strip(),
+        birth_date=birth_date,
+        sex=(row.get("sexe") or "").strip(),
+        club=(row.get("club") or "").strip() or None,
+        license_number=(row.get("licence") or "").strip(),
+        medical_certificate_valid_until=certificate,
+    )
+
+
+def _format_row_error(exc: ValueError | ValidationError) -> str:
+    if isinstance(exc, ValidationError):
+        first = exc.errors()[0]
+        field = ".".join(str(part) for part in first["loc"])
+        return f"Champ « {field} » invalide : {first['msg']}"
+    return str(exc)

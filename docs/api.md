@@ -34,6 +34,7 @@ Les erreurs de validation (422) gardent le format FastAPI par défaut.
 | POST | `/competitions/{competition_id}/events` | Ajoute une épreuve (`name`, `unit`, `category` optionnelle) | 201, 404, 422 |
 | GET | `/athletes` | Liste les athlètes triés par nom, filtre optionnel `?club=` (égalité exacte) | 200 |
 | POST | `/athletes` | Crée un athlète ; la réponse ajoute sa `category` pour la saison en cours | 201, 409, 422 |
+| POST | `/athletes/import` | Importe des athlètes depuis un CSV `;` (en-têtes `nom;prenom;date_naissance;sexe;club;licence;certificat_valide_jusqu`, dates `jj/mm/aaaa`) ; licences déjà connues ignorées (`skipped`), lignes invalides reportées (`errors`) sans bloquer les suivantes | 200 |
 | GET | `/athletes/{athlete_id}` | Détail d'un athlète | 200, 404 |
 | POST | `/events/{event_id}/registrations` | Inscrit un athlète (`athlete_id`) à une épreuve et lui attribue un dossard | 201, 404, 409, 422 |
 | PATCH | `/registrations/{registration_id}` | Change le `status` d'une inscription | 200, 404, 409, 422 |

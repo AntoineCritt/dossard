@@ -100,6 +100,17 @@ class AthleteOut(BaseModel):
     category: AgeCategory
 
 
+class AthleteImportError(BaseModel):
+    line: int
+    message: str
+
+
+class AthleteImportReport(BaseModel):
+    created: int
+    skipped: int
+    errors: list[AthleteImportError]
+
+
 class RegistrationCreate(BaseModel):
     athlete_id: int
 
