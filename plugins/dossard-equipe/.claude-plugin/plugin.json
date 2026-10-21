@@ -1,0 +1,9 @@
+{
+  "name": "dossard-equipe",
+  "description": "Outils d'équipe pour le projet dossard : conventions API, garde-fous et serveur MCP de consultation.",
+  "version": "1.0.0",
+  "author": {
+    "name": "antoine.seguin1",
+    "email": "antoine.seguin@grand-insep.fr"
+  }
+}
