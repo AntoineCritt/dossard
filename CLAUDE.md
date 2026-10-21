@@ -2,54 +2,52 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Projet
-
-Dossard : API FastAPI + SQLite de gestion de compétitions sportives (compétitions, épreuves, athlètes, inscriptions, résultats). C'est le dépôt fil rouge d'une formation Claude Code de deux jours — chaque module le fait évoluer (nouveaux endpoints, skills, hooks, CI, serveur MCP, sous-agents). Attendez-vous à des instructions de modules de formation en plus des demandes de l'utilisateur.
+Dossard : API FastAPI + SQLite de gestion de compétitions sportives (compétitions, épreuves, athlètes, inscriptions, résultats). Projet fil rouge d'une formation Claude Code ; code, commentaires, docstrings et messages d'erreur sont en français.
 
 ## Commandes
 
 ```bash
-pip install -e ".[dev]"             # installation (Python 3.12+, venv déjà présent dans .venv)
-pytest                              # tous les tests
-pytest tests/test_registrations.py  # un seul fichier de test
-pytest -k nom_du_test               # un seul test par nom
-ruff check . && ruff format .       # lint + formatage
-python scripts/seed.py --reset      # rebâtit data/dossard.db avec des données synthétiques
-uvicorn app.main:app --reload       # serveur sur http://localhost:8000 (doc interactive : /docs)
+pip install -e ".[dev]"             # installation (Python ≥ 3.12, venv dans .venv)
+pytest                              # tous les tests (doivent être verts avant tout commit)
+pytest tests/test_results.py::test_nom   # un seul test
+ruff check . && ruff format .       # lint + formatage (line-length 100, règles E F I UP B ANN)
+python scripts/seed.py [--reset]    # données synthétiques dans data/dossard.db
+uvicorn app.main:app --reload       # serveur sur :8000, doc interactive sur /docs
 ```
-
-Les tests n'utilisent jamais `data/dossard.db` : `tests/conftest.py` fournit une base SQLite temporaire par test via la variable d'environnement `DOSSARD_DB`.
 
 ## Architecture
 
-Flux d'une requête : `routers/` (validation Pydantic, pas de SQL) → `repositories/` (SQL + règles métier, lèvent `ApiError`/`NotFoundError`/`ConflictError`) → `app/db.py` (une connexion SQLite par requête, commit si succès, rollback sinon). Le handler global dans `app/main.py` sérialise toute `ApiError` en `{"error": {"code", "message"}}`. Un module métier par entité, même nom dans `repositories/` et `routers/` (ex. `repositories/registrations.py` ↔ `routers/registrations.py`).
+Trois couches par entité (competitions, athletes, registrations, results), un module chacune :
 
-`app/schema.sql` est la seule source de vérité du schéma, appliqué de façon idempotente par `init_db()` au démarrage (pas de migrations). Deux vues (`v_public_athletes`, `v_public_results`) exposent volontairement moins de colonnes que les tables : c'est ce que lit le serveur MCP en lecture seule (`scripts/mcp_dossard.py`), jamais les tables brutes.
+- `app/routers/<entité>.py` : endpoints FastAPI minces, la connexion arrive via la dépendance `Conn` (`app/db.py`).
+- `app/repositories/<entité>.py` : SQL brut `sqlite3` et règles métier ; renvoient des modèles Pydantic de `app/schemas.py`. `repositories/common.py::fetch_or_404` factorise « une ligne ou 404 ».
+- `app/schema.sql` : tables + vues. `init_db` l'exécute au démarrage (idempotent, `CREATE ... IF NOT EXISTS`) : il n'y a pas de migrations, une modification de table existante demande de recréer la base.
 
-Règles métier (détaillées avec leurs codes d'erreur dans `docs/api.md`, **à tenir à jour à chaque évolution de l'API** — règle du projet) :
-- inscription uniquement sur une compétition `open` ; une inscription non annulée par athlète et par épreuve
-- catégorie de l'épreuve (si définie) = catégorie d'âge de l'athlète pour la saison de la compétition (`app/categories.py`, âge atteint au 31/12)
-- certificat médical obligatoire et valide à la date de la compétition
-- dossard = max des dossards de la compétition + 1, jamais réattribué même après annulation
-- résultat enregistrable seulement sur une inscription `confirmed` d'une compétition `closed`
-- classement (`app/ranking.py`) : temps croissants, distances/points décroissants ; seules les inscriptions `confirmed` avec résultat y figurent
+Points transverses :
 
-Transitions d'état : compétition `draft → open → closed → finished` ; inscription `pending → confirmed|cancelled`, `confirmed → cancelled`. Toute autre transition renvoie 409 `invalid_transition`.
+- **Connexion** : `get_conn` ouvre une connexion par requête, commit en fin de requête, rollback sur exception. Le chemin vient de `DOSSARD_DB`, sinon `data/dossard.db`.
+- **Erreurs** : lever `ApiError` / `NotFoundError` / `ConflictError` (`app/errors.py`) avec un `code` explicite ; le handler global de `app/main.py` les sérialise en `{"error": {"code", "message"}}`. Les codes sont listés dans `docs/api.md`.
+- **Logique pure** : `app/categories.py` (catégorie d'âge = année de saison − année de naissance) et `app/ranking.py` (temps croissants, distances/points décroissants) n'accèdent pas à la base.
+- **Vues publiques** : `v_public_athletes` et `v_public_results` n'exposent que des colonnes non sensibles (année de naissance seule, inscriptions confirmées seulement). Le serveur MCP `scripts/mcp_dossard.py` (stdlib seule, lecture seule, ne lit que ces deux vues) en dépend : ne pas y ajouter de colonnes personnelles.
+- **Scripts** (`scripts/`) : `seed.py`, `classement_html.py` (appelle l'API via `TestClient`, sans serveur), `mcp_dossard.py`, `recepteur_hooks.py`. `scripts/legacy/` est du code historique, exclu de ruff.
 
-`app/routers/results.py` s'écarte délibérément des conventions du reste du code (nommage camelCase, `HTTPException` au lieu de `ApiError`, réponse enveloppée `{"data", "count"}` au lieu d'une liste nue) : ne pas copier ce style ailleurs sans qu'un exercice de formation ne le demande explicitement.
+## Règles
 
-`scripts/legacy/` contient un ancien import CSV volontairement non idiomatique, cible d'un exercice de refactoring.
-
-## Règles du projet
-
-- Lancer `pytest` : tous les tests doivent passer avant tout commit.
-- Lancer `ruff check . && ruff format .` après toute modification de code Python.
-- Faire passer toute erreur métier par `app/errors.py` (`ApiError`, `NotFoundError`, `ConflictError`) ; ne jamais lever `HTTPException` directement (`app/routers/results.py` est l'exception historique connue, pas un modèle à suivre).
-- Réutiliser les fixtures de `tests/conftest.py` (`client`, `make_competition`, `make_event`, `make_athlete`, `make_registration`) plutôt que d'en recréer.
-- Mettre un fichier de test par router.
-- Tester systématiquement les cas d'erreur de chaque endpoint (404, 409, 422), pas seulement le cas nominal.
-- Pour toute route ajoutée ou modifiée, ajouter une ligne dans `docs/api.md`.
-- Pour toute route ajoutée ou modifiée, ajouter une entrée en tête de `CHANGELOG.md`, section « Non publié » (créer ce fichier s'il n'existe pas encore).
-- Ne jamais modifier ni supprimer un fichier de `scripts/legacy/` sans demande explicite (la lecture est libre).
-- Ne jamais ajouter de nouvelle dépendance sans demander.
+- **Tests verts avant tout commit** : `pytest`.
+- **Après toute modification Python** : `ruff check . && ruff format .` est obligatoire.
+- **Erreurs** : format `{"error": {"code", "message"}}`, toujours via `app/errors.py` (`ApiError`, `NotFoundError`, `ConflictError`), **jamais `HTTPException`**.
+- **Tests** :
+  - un fichier de test par router ;
+  - réutiliser les fixtures de `tests/conftest.py` : `client`, `make_competition`, `make_event`, `make_athlete`, `make_registration` (pas de SQL direct) ;
+  - toujours tester les cas d'erreur (404, 409, 422) ;
+  - chaque test a sa base temporaire (`db_path` via `DOSSARD_DB`) : ne jamais toucher `data/dossard.db`.
+- **Route ajoutée ou modifiée** : une ligne dans `docs/api.md` **et** une entrée en tête de `CHANGELOG.md`, section « Non publié » (créer le fichier s'il n'existe pas).
+- **`scripts/legacy/`** : lecture autorisée, aucune modification ni suppression sans demande explicite.
+- **Dépendances** : pas de nouvelle dépendance sans demander.
 - Ne jamais lire ni afficher .env : il contient des secrets.
+
+## Conventions
+
+- Style des nouveaux endpoints : modèle de `routers/registrations.py` (noms en snake_case, annotations de type complètes — ruff impose `ANN`, `from __future__ import annotations`). `routers/results.py` contient des restes à ne pas imiter : fonctions en camelCase (`getRanking`, `exportCsv`), `HTTPException` avec `detail`, réponse `dict` non typée.
+- Les données d'exemple et de test sont synthétiques : aucune donnée personnelle réelle.
+- `CLAUDE.local.md` et `.claude/settings.local.json` sont personnels et ignorés par Git.

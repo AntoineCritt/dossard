@@ -13,7 +13,7 @@ router = APIRouter(tags=["results"])
 @router.put(
     "/registrations/{registration_id}/result",
     response_model=ResultOut,
-    summary="Enregistrer le résultat d'une inscription",
+    summary="Enregistrer ou remplacer le résultat d'une inscription",
 )
 def record_result(registration_id: int, data: ResultIn, conn: Conn) -> ResultOut:
     return results.record_result(conn, registration_id, data.performance)
@@ -31,7 +31,7 @@ def get_ranking(event_id: int, conn: Conn) -> list[RankingEntry]:
 
 @router.get(
     "/competitions/{competition_id}/results.csv",
-    summary="Exporter les résultats d'une compétition au format CSV",
+    summary="Exporter les résultats d'une compétition en CSV",
 )
 def export_csv(competition_id: int, conn: Conn) -> Response:
     csv = results.export_csv(conn, competition_id)

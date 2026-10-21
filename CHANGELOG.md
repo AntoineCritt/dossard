@@ -2,9 +2,7 @@
 
 ## Non publié
 
-- Corrige `GET /competitions/{competition_id}/results.csv` : le CSV était construit par concaténation manuelle et se décalait d'une colonne quand un club contenait une virgule ; génération via le module `csv` (échappement correct des champs).
-- Harmonise `app/routers/results.py` avec les conventions du projet : erreurs via `NotFoundError` (plus de `HTTPException`), noms en snake_case (`get_ranking`/`event_id`, `export_csv`), réponse de `GET /events/{event_id}/ranking` en liste nue (`response_model=list[RankingEntry]`, plus d'enveloppe `{"data", "count"}`), `summary=` en français sur chaque route.
-- Ajout de la pagination à `GET /athletes` : paramètres `limit` (1-100, défaut 50) et `offset` (défaut 0).
-- Ajout de `POST /athletes/import` : import en masse d'athlètes depuis un CSV (200).
-- Supprime le script `scripts/legacy/import_licencies.py`, remplacé par l'endpoint d'import.
-- Ajout de `GET /athletes/{athlete_id}` : détail d'un athlète (200, 404).
+- Harmonise `GET /events/{event_id}/ranking` : renvoie désormais la liste nue des entrées (plus d'enveloppe `{"data", "count"}`) ; épreuve inconnue → 404 au format `{"error": {...}}` (code `not_found`). Ajoute un `summary` à chaque route de résultats.
+- Ajoute la pagination `?limit=` (1–100, défaut 50) et `?offset=` (≥ 0, défaut 0) à `GET /athletes`, appliquée après le filtre `club` ; valeurs hors bornes rejetées en 422.
+- Ajoute `POST /athletes/import` : import d'un CSV fédéral (`text/csv`, `;`, dates `jj/mm/aaaa`) avec compte-rendu `created` / `skipped` / `errors`. Remplace `scripts/legacy/import_licencies.py`, supprimé.
+- Ajoute `GET /athletes/{athlete_id}` : détail d'un athlète (404 si introuvable).
