@@ -10,7 +10,7 @@ concurrency:
 
 permissions:
   contents: read
-  pull-requests: read
+  pull-requests: write
 
 jobs:
   revue:
@@ -26,5 +26,11 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
           show_full_output: true
-          prompt: "Relis le diff de cette pull request par rapport à origin/main et signale les problèmes réels, en cinq remarques au plus."
-          claude_args: '--max-turns 6 --model sonnet --allowedTools "Read,Grep,Glob,Bash(git diff:*),Bash(git log:*)"'
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
+
+            Relis le diff de cette pull request par rapport à origin/main et signale les problèmes réels, en cinq remarques au plus.
+
+            Publie ton retour avec `gh pr comment ${{ github.event.pull_request.number }} --body "..."` : ne réponds pas seulement en texte, le commentaire doit apparaître sur la pull request.
+          claude_args: '--max-turns 6 --model sonnet --allowedTools "Read,Grep,Glob,Bash(git diff:*),Bash(git log:*),Bash(gh pr comment:*)"'
