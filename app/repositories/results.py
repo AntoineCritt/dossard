@@ -7,22 +7,7 @@ from datetime import UTC, datetime
 
 from app.errors import ConflictError, NotFoundError
 from app.repositories.common import fetch_or_404
-from app.schemas import ResultOut
-
-CSV_HEADER = [
-    "competition",
-    "event",
-    "unit",
-    "bib",
-    "first_name",
-    "last_name",
-    "birth_date",
-    "sex",
-    "club",
-    "license_number",
-    "medical_certificate_valid_until",
-    "performance",
-]
+from app.schemas import ResultOut, ResultUnit
 
 
 def record_result(conn: sqlite3.Connection, registration_id: int, performance: float) -> ResultOut:
@@ -56,10 +41,7 @@ def record_result(conn: sqlite3.Connection, registration_id: int, performance: f
 
 def get_event(conn: sqlite3.Connection, event_id: int) -> sqlite3.Row:
     return fetch_or_404(
-        conn,
-        "SELECT * FROM events WHERE id = ?",
-        (event_id,),
-        f"Épreuve {event_id} introuvable",
+        conn, "SELECT * FROM events WHERE id = ?", (event_id,), f"Épreuve {event_id} introuvable"
     )
 
 
@@ -83,9 +65,24 @@ def export_csv(conn: sqlite3.Connection, competition_id: int) -> str:
     if competition is None:
         raise NotFoundError(f"Compétition {competition_id} introuvable")
 
-    buffer = io.StringIO()
-    writer = csv.writer(buffer)
-    writer.writerow(CSV_HEADER)
+    out = io.StringIO()
+    writer = csv.writer(out, lineterminator="\n")
+    writer.writerow(
+        [
+            "competition",
+            "event",
+            "unit",
+            "bib",
+            "first_name",
+            "last_name",
+            "birth_date",
+            "sex",
+            "club",
+            "license_number",
+            "medical_certificate_valid_until",
+            "performance",
+        ]
+    )
     events = conn.execute(
         "SELECT * FROM events WHERE competition_id = ? ORDER BY id", (competition_id,)
     ).fetchall()
@@ -98,11 +95,10 @@ def export_csv(conn: sqlite3.Connection, competition_id: int) -> str:
             (event["id"],),
         ).fetchall()
         for row in rows:
-            performance = (
-                int(row["performance"])
-                if event["unit"] == "points"
-                else round(row["performance"], 2)
-            )
+            if event["unit"] in (ResultUnit.TIME_S, ResultUnit.DISTANCE_M):
+                performance = str(round(row["performance"], 2))
+            else:
+                performance = str(int(row["performance"]))
             writer.writerow(
                 [
                     competition["name"],
@@ -113,10 +109,10 @@ def export_csv(conn: sqlite3.Connection, competition_id: int) -> str:
                     row["last_name"],
                     row["birth_date"],
                     row["sex"],
-                    row["club"] or "",
+                    row["club"],
                     row["license_number"],
-                    row["medical_certificate_valid_until"] or "",
+                    row["medical_certificate_valid_until"],
                     performance,
                 ]
             )
-    return buffer.getvalue()
+    return out.getvalue()

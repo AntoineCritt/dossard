@@ -3,14 +3,23 @@ from __future__ import annotations
 import csv
 import io
 import sqlite3
-from datetime import date
+from datetime import date, datetime
 
 from pydantic import ValidationError
 
 from app.categories import age_category
-from app.errors import ConflictError
-from app.repositories.common import fetch_or_404
-from app.schemas import AthleteCreate, AthleteImportError, AthleteImportReport, AthleteOut
+from app.errors import ApiError, ConflictError, NotFoundError
+from app.schemas import AthleteCreate, AthleteImportResult, AthleteOut, ImportLineError
+
+IMPORT_COLUMNS = (
+    "nom",
+    "prenom",
+    "date_naissance",
+    "sexe",
+    "club",
+    "licence",
+    "certificat_valide_jusqu",
+)
 
 
 def _to_athlete(row: sqlite3.Row) -> AthleteOut:
@@ -30,29 +39,22 @@ def _to_athlete(row: sqlite3.Row) -> AthleteOut:
 
 
 def list_athletes(
-    conn: sqlite3.Connection,
-    club: str | None = None,
-    limit: int = 50,
-    offset: int = 0,
+    conn: sqlite3.Connection, club: str | None = None, limit: int = 50, offset: int = 0
 ) -> list[AthleteOut]:
     sql = "SELECT * FROM athletes"
-    params: list[str | int] = []
+    params: tuple[str | int, ...] = ()
     if club is not None:
         sql += " WHERE club = ?"
-        params.append(club)
+        params = (club,)
     sql += " ORDER BY last_name, first_name, id LIMIT ? OFFSET ?"
-    params.append(limit)
-    params.append(offset)
+    params += (limit, offset)
     return [_to_athlete(row) for row in conn.execute(sql, params)]
 
 
 def get_athlete(conn: sqlite3.Connection, athlete_id: int) -> AthleteOut:
-    row = fetch_or_404(
-        conn,
-        "SELECT * FROM athletes WHERE id = ?",
-        (athlete_id,),
-        f"Athlète {athlete_id} introuvable",
-    )
+    row = conn.execute("SELECT * FROM athletes WHERE id = ?", (athlete_id,)).fetchone()
+    if row is None:
+        raise NotFoundError(f"Athlète {athlete_id} introuvable")
     return _to_athlete(row)
 
 
@@ -81,55 +83,55 @@ def create_athlete(conn: sqlite3.Connection, data: AthleteCreate) -> AthleteOut:
     return _to_athlete(row)
 
 
-def import_athletes_csv(conn: sqlite3.Connection, content: str) -> AthleteImportReport:
-    reader = csv.DictReader(io.StringIO(content), delimiter=";")
-    created = 0
-    skipped = 0
-    errors: list[AthleteImportError] = []
-    for line_number, row in enumerate(reader, start=2):
-        try:
-            data = _row_to_athlete_create(row)
-        except (ValueError, ValidationError) as exc:
-            errors.append(AthleteImportError(line=line_number, message=_format_row_error(exc)))
-            continue
-        try:
-            create_athlete(conn, data)
-            created += 1
-        except ConflictError:
-            skipped += 1
-    return AthleteImportReport(created=created, skipped=skipped, errors=errors)
-
-
-def _parse_french_date(value: str | None, label: str) -> date | None:
-    value = (value or "").strip()
-    if not value:
-        return None
+def _parse_import_date(value: str, label: str) -> date:
     try:
-        day_str, month_str, year_str = value.split("/")
-        return date(int(year_str), int(month_str), int(day_str))
-    except (ValueError, IndexError) as exc:
-        raise ValueError(f"{label} invalide : « {value} »") from exc
+        return datetime.strptime(value, "%d/%m/%Y").date()
+    except ValueError:
+        raise ValueError(f"{label} invalide : « {value} » (attendu jj/mm/aaaa)") from None
 
 
-def _row_to_athlete_create(row: dict[str, str | None]) -> AthleteCreate:
-    birth_date = _parse_french_date(row.get("date_naissance"), "Date de naissance")
-    if birth_date is None:
-        raise ValueError("Date de naissance manquante")
-    certificate = _parse_french_date(row.get("certificat_valide_jusqu"), "Certificat médical")
+def _row_to_create(row: dict[str, str | None]) -> AthleteCreate:
+    values = {key: (row.get(key) or "").strip() for key in IMPORT_COLUMNS}
+    certificate = values["certificat_valide_jusqu"]
     return AthleteCreate(
-        first_name=(row.get("prenom") or "").strip(),
-        last_name=(row.get("nom") or "").strip(),
-        birth_date=birth_date,
-        sex=(row.get("sexe") or "").strip(),
-        club=(row.get("club") or "").strip() or None,
-        license_number=(row.get("licence") or "").strip(),
-        medical_certificate_valid_until=certificate,
+        last_name=values["nom"],
+        first_name=values["prenom"],
+        birth_date=_parse_import_date(values["date_naissance"], "Date de naissance"),
+        sex=values["sexe"],
+        club=values["club"] or None,
+        license_number=values["licence"],
+        medical_certificate_valid_until=(
+            _parse_import_date(certificate, "Date de certificat") if certificate else None
+        ),
     )
 
 
-def _format_row_error(exc: ValueError | ValidationError) -> str:
-    if isinstance(exc, ValidationError):
-        first = exc.errors()[0]
-        field = ".".join(str(part) for part in first["loc"])
-        return f"Champ « {field} » invalide : {first['msg']}"
-    return str(exc)
+def import_athletes(conn: sqlite3.Connection, content: str) -> AthleteImportResult:
+    """Importe un CSV fédéral (`;`, dates jj/mm/aaaa) ; une ligne invalide n'arrête pas l'import."""
+    reader = csv.DictReader(io.StringIO(content), delimiter=";")
+    missing = [column for column in IMPORT_COLUMNS if column not in (reader.fieldnames or [])]
+    if missing:
+        raise ApiError(f"Colonnes manquantes : {', '.join(missing)}", code="invalid_csv")
+
+    created = 0
+    skipped = 0
+    errors: list[ImportLineError] = []
+    for row in reader:
+        line = reader.line_num
+        if not any((value or "").strip() for value in row.values() if isinstance(value, str)):
+            continue
+        try:
+            data = _row_to_create(row)
+            create_athlete(conn, data)
+        except ConflictError:
+            skipped += 1
+        except ValidationError as exc:
+            details = "; ".join(
+                f"{'.'.join(str(p) for p in e['loc'])} : {e['msg']}" for e in exc.errors()
+            )
+            errors.append(ImportLineError(line=line, message=details))
+        except ValueError as exc:
+            errors.append(ImportLineError(line=line, message=str(exc)))
+        else:
+            created += 1
+    return AthleteImportResult(created=created, skipped=skipped, errors=errors)

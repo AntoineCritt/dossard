@@ -1,1 +1,1 @@
-{"tool_name": "Bash", "tool_input": {"command": "cd E:/Projects/Formations/dossard && rm -rf .pytest_cache .ruff_cache"}}
+{"tool_name": "Bash", "tool_input": {"command": "rm -rf .pytest_cache"}}
